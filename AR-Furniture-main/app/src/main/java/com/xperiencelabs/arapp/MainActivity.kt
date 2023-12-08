@@ -5,14 +5,13 @@ import android.view.MotionEvent
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.ar.core.Config
 import io.github.sceneview.ar.ArSceneView
 import io.github.sceneview.ar.node.ArModelNode
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.ar.node.PlacementMode
 import android.widget.Toast
-
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
 
@@ -21,9 +20,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var setButton: FloatingActionButton
     private val modelFiles = listOf("models/desktop_computer.glb", "models/gaming_chair.glb")
     private var modelIndex = 0
-    private var placedModelNodes = mutableListOf<ArModelNode>() // List to keep track of placed models
+    private var placedModelNodes = mutableListOf<ArModelNode>()
     private var currentModelNode: ArModelNode? = null
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
     private var lastRotation = 0f
+    private var isDragging = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,9 +38,7 @@ class MainActivity : AppCompatActivity() {
         placeButton.setOnClickListener {
             if (modelIndex < modelFiles.size) {
                 currentModelNode = loadAndPlaceModel(modelFiles[modelIndex])
-                // Do not increment modelIndex here. It will be incremented after "Set" is clicked
             } else {
-                // Handle the case where there are no more models to place
                 showToast("All models have been placed.")
             }
         }
@@ -46,16 +46,62 @@ class MainActivity : AppCompatActivity() {
         setButton.setOnClickListener {
             currentModelNode?.let {
                 placedModelNodes.add(it)
-                currentModelNode = null // Clear the reference to allow a new model to be placed
-                modelIndex++ // Ready to place the next model
+                currentModelNode = null
+                modelIndex++
             }
         }
 
         sceneView.setOnTouchListener { _, event ->
-            handleRotation(event)
+            if (currentModelNode != null && event.pointerCount == 1) {
+                handleTouch(event)
+            } else if (event.pointerCount == 2) {
+                handleRotation(event)
+            }
             true
         }
     }
+
+    private fun handleTouch(event: MotionEvent) {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                isDragging = true
+                lastTouchX = event.x
+                lastTouchY = event.y
+                Log.d("ARApp", "Touch down at: x=$lastTouchX, y=$lastTouchY")
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (isDragging) {
+                    val deltaX = (event.x - lastTouchX) * 0.005f
+                    val deltaZ = (event.y - lastTouchY) * 0.005f
+
+                    val modelNode = currentModelNode ?: placedModelNodes.lastOrNull()
+                    if (modelNode != null) {
+                        val currentPosition = modelNode.position
+                        val newPosition = Position(currentPosition.x + deltaX, currentPosition.y, currentPosition.z - deltaZ)
+
+                        if (newPosition != currentPosition) {
+                            modelNode.position = newPosition
+                            Log.d("ARApp", "Moved to position: $newPosition")
+                        } else {
+                            Log.d("ARApp", "Position unchanged")
+                        }
+                    } else {
+                        Log.d("ARApp", "No modelNode found for movement")
+                    }
+
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                isDragging = false
+                Log.d("ARApp", "Touch up, drag ended")
+            }
+        }
+    }
+
+
+
 
     private fun handleRotation(event: MotionEvent) {
         when (event.action) {
@@ -63,18 +109,16 @@ class MainActivity : AppCompatActivity() {
                 lastRotation = event.x
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!placedModelNodes.isEmpty()) {
-                    val rotationDelta = (event.x - lastRotation) / 10
-                    val currentRotation = placedModelNodes.last().rotation
-                    placedModelNodes.last().rotation = Rotation(x = currentRotation.x, y = currentRotation.y + rotationDelta, z = currentRotation.z)
-                    lastRotation = event.x
-                }
+                val rotationDelta = (event.x - lastRotation) / 10
+                val currentRotation = placedModelNodes.lastOrNull()?.rotation ?: return
+                placedModelNodes.lastOrNull()?.rotation = Rotation(x = currentRotation.x, y = currentRotation.y + rotationDelta, z = currentRotation.z)
+                lastRotation = event.x
             }
         }
     }
 
     private fun loadAndPlaceModel(modelFileLocation: String): ArModelNode {
-        val offset = 1.5f * placedModelNodes.size // Adjust this offset based on how many models have been placed
+        val offset = 1.0f * placedModelNodes.size
         val modelNode = ArModelNode(sceneView.engine, PlacementMode.INSTANT).apply {
             loadModelGlbAsync(
                 glbFileLocation = modelFileLocation,
@@ -91,6 +135,4 @@ class MainActivity : AppCompatActivity() {
     private fun showToast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
-
-    // Override onPause and onDestroy if needed...
 }
